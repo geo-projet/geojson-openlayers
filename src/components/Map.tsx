@@ -1,59 +1,128 @@
-"use client";
+'use client';
 
-import { useEffect, useRef } from "react";
-import Map from "ol/Map";
-import View from "ol/View";
-import { Tile as TileLayer, Vector as VectorLayer } from "ol/layer";
-import { OSM } from "ol/source";
-import VectorSource from "ol/source/Vector";
-import GeoJSON from "ol/format/GeoJSON";
-import { Style, Fill, Stroke } from "ol/style";
-import { FeatureLike } from "ol/Feature";
-import "ol/ol.css";
+import { useEffect, useRef } from 'react';
+import Map from 'ol/Map';
+import View from 'ol/View';
+import { Tile as TileLayer, Vector as VectorLayer } from 'ol/layer';
+import { OSM, XYZ } from 'ol/source';
+import VectorSource from 'ol/source/Vector';
+import GeoJSON from 'ol/format/GeoJSON';
+import { Style, Fill, Stroke } from 'ol/style';
+import 'ol/ol.css';
 
 interface MapProps {
-  geojsonData: GeoJSON.FeatureCollection;
+  geojsonData: GeoJSON.FeatureCollection | null;
+  basemapId: string;
+  thematicLayerVisible: boolean;
 }
 
-export default function OLMap({ geojsonData }: MapProps) {
+// Définition des couches de fond de carte
+const basemapLayers = {
+  osm: new TileLayer({
+    source: new OSM(),
+    properties: { id: 'osm' },
+  }),
+  'carto-light': new TileLayer({
+    source: new XYZ({
+      url: 'https://{a-d}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+      attributions: '© CartoDB, © OpenStreetMap contributors',
+    }),
+    properties: { id: 'carto-light' },
+  }),
+  'carto-dark': new TileLayer({
+    source: new XYZ({
+      url: 'https://{a-d}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+      attributions: '© CartoDB, © OpenStreetMap contributors',
+    }),
+    properties: { id: 'carto-dark' },
+  }),
+  satellite: new TileLayer({
+    source: new XYZ({
+      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      attributions: '© Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
+    }),
+    properties: { id: 'satellite' },
+  }),
+};
+
+export default function OLMap({ geojsonData, basemapId, thematicLayerVisible }: MapProps) {
   const mapRef = useRef<HTMLDivElement | null>(null);
+  const mapInstance = useRef<Map | null>(null);
 
+  // Initialisation de la carte
   useEffect(() => {
-    if (!mapRef.current) return;
+    if (!mapRef.current || mapInstance.current) return;
 
-    // Source GeoJSON
-    const vectorSource = new VectorSource({
-      features: new GeoJSON().readFeatures(geojsonData, {
-        featureProjection: "EPSG:3857", // reprojection pour Web Mercator
-      }),
-    });
-
-    // Style simple
-    const vectorLayer = new VectorLayer({
-      source: vectorSource,
-      style: (feature: FeatureLike) =>
-        new Style({
-          fill: new Fill({ color: "rgba(0, 150, 255, 0.4)" }),
-          stroke: new Stroke({ color: "#003366", width: 2 }),
-        }),
-    });
-
-    const map = new Map({
+    mapInstance.current = new Map({
       target: mapRef.current,
-      layers: [
-        new TileLayer({ source: new OSM() }),
-        vectorLayer,
-      ],
+      layers: Object.values(basemapLayers),
       view: new View({
-        center: [-8230000, 5700000], // exemple: Montréal
-        zoom: 6,
+        center: [0, 0],
+        zoom: 2,
       }),
     });
 
     return () => {
-      map.setTarget(undefined);
+      if (mapInstance.current) {
+        mapInstance.current.setTarget(undefined);
+        mapInstance.current = null;
+      }
     };
+  }, []);
+
+  // Gestion du changement de fond de carte
+  useEffect(() => {
+    if (!mapInstance.current) return;
+    Object.values(basemapLayers).forEach(layer => {
+      const isVisible = layer.get('id') === basemapId;
+      layer.setVisible(isVisible);
+    });
+  }, [basemapId]);
+
+  // Gestion de la couche de données GeoJSON
+  useEffect(() => {
+    if (!mapInstance.current || !geojsonData) return;
+
+    const map = mapInstance.current;
+    const oldLayer = map.getLayers().getArray().find(layer => layer.get('id') === 'geojson-layer');
+    if (oldLayer) {
+      map.removeLayer(oldLayer);
+    }
+
+    const vectorSource = new VectorSource({
+      features: new GeoJSON().readFeatures(geojsonData, {
+        featureProjection: 'EPSG:3857',
+      }),
+    });
+
+    const vectorLayer = new VectorLayer({
+      source: vectorSource,
+      style: new Style({
+        fill: new Fill({ color: 'rgba(0, 150, 255, 0.4)' }),
+        stroke: new Stroke({ color: '#003366', width: 2 }),
+      }),
+      properties: { id: 'geojson-layer' },
+    });
+
+    map.addLayer(vectorLayer);
+
+    const extent = vectorSource.getExtent();
+    if (extent && isFinite(extent[0])) {
+      map.getView().fit(extent, {
+        padding: [50, 50, 50, 50],
+        duration: 1000,
+      });
+    }
   }, [geojsonData]);
 
-  return <div ref={mapRef} style={{ width: "100%", height: "500px" }} />;
+  // Gestion de la visibilité de la couche thématique
+  useEffect(() => {
+    if (!mapInstance.current) return;
+    const thematicLayer = mapInstance.current.getLayers().getArray().find(layer => layer.get('id') === 'geojson-layer');
+    if (thematicLayer) {
+      thematicLayer.setVisible(thematicLayerVisible);
+    }
+  }, [thematicLayerVisible]);
+
+  return <div ref={mapRef} style={{ width: '100%', height: '100%' }} className="relative" />;
 }
