@@ -7,7 +7,10 @@ import { Tile as TileLayer, Vector as VectorLayer } from 'ol/layer';
 import { OSM, XYZ } from 'ol/source';
 import VectorSource from 'ol/source/Vector';
 import GeoJSON from 'ol/format/GeoJSON';
-import { Style, Fill, Stroke } from 'ol/style';
+import { Style, Fill, Stroke, Circle as CircleStyle } from 'ol/style';
+import type Feature from 'ol/Feature';
+import type { FeatureLike } from 'ol/Feature';
+import MapBrowserEvent, { type MapEventType } from 'ol/MapBrowserEvent';
 import 'ol/ol.css';
 
 interface MapProps {
@@ -48,6 +51,12 @@ const basemapLayers = {
 export default function OLMap({ geojsonData, basemapId, thematicLayerVisible }: MapProps) {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const mapInstance = useRef<Map | null>(null);
+  const highlightedFeatureRef = useRef<Feature | null>(null);
+  const highlightStyle = new Style({
+    fill: new Fill({ color: 'rgba(255, 255, 0, 0.6)' }),
+    stroke: new Stroke({ color: '#ffcc00', width: 3 }),
+    image: new CircleStyle({ radius: 8, fill: new Fill({ color: '#ffcc00' }) })
+  });
 
   // Initialisation de la carte
   useEffect(() => {
@@ -123,6 +132,33 @@ export default function OLMap({ geojsonData, basemapId, thematicLayerVisible }: 
       thematicLayer.setVisible(thematicLayerVisible);
     }
   }, [thematicLayerVisible]);
+
+  // Gestion du clic sur la carte pour surligner la feature vectorielle
+  useEffect(() => {
+    if (!mapInstance.current) return;
+    const map = mapInstance.current;
+    function handleClick(evt: unknown) {
+      let featureFound = false;
+      // @ts-expect-error: evt has pixel property at runtime
+      map.forEachFeatureAtPixel(evt.pixel, (feature: FeatureLike) => {
+        featureFound = true;
+        if (highlightedFeatureRef.current) {
+          highlightedFeatureRef.current.setStyle(undefined);
+        }
+        (feature as Feature).setStyle(highlightStyle);
+        highlightedFeatureRef.current = feature as Feature;
+        return true;
+      });
+      if (!featureFound && highlightedFeatureRef.current) {
+        highlightedFeatureRef.current.setStyle(undefined);
+        highlightedFeatureRef.current = null;
+      }
+    }
+    map.on('singleclick', handleClick);
+    return () => {
+      map.un('singleclick', handleClick);
+    };
+  }, [highlightStyle]);
 
   return <div ref={mapRef} style={{ width: '100%', height: '100%' }} className="relative" />;
 }
